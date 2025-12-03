@@ -69,8 +69,8 @@ jobs:
       - name: Configure Git
         if: steps.action.outputs.should_sync == 'true'
         run: |
-          git config user.name "rustdesk-sync-bot"
-          git config user. email "bot@github-actions"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
       
       - name: Sync with Upstream Release
         if: steps.action. outputs.should_sync == 'true'
