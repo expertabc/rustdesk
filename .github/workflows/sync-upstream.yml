@@ -1,47 +1,86 @@
-name: Sync Fork with Upstream
+name: Sync on New Upstream Release
 
 on:
-  # Täglich um 2 Uhr nachts ausführen
   schedule:
-    - cron: '0 2 * * *'
+    # Prüfe alle 6 Stunden (sparsamer als täglich)
+    - cron: '0 */6 * * *'
   
   # Manueller Trigger
   workflow_dispatch:
 
 jobs:
-  sync:
+  check-and-sync:
     runs-on: ubuntu-latest
     
     steps:
       - name: Checkout Fork
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Get Latest Upstream Release
+        id: upstream
+        run: |
+          # Hole neueste Release-Version von RustDesk
+          LATEST_RELEASE=$(curl -s https://api.github.com/repos/rustdesk/rustdesk/releases/latest | jq -r '. tag_name')
+          echo "latest_release=$LATEST_RELEASE" >> $GITHUB_OUTPUT
+          echo "Neuestes Upstream Release: $LATEST_RELEASE"
+      
+      - name: Get Current Fork Release
+        id: current
+        run: |
+          # Hole aktuelle Version im Fork
+          git fetch --tags
+          CURRENT_RELEASE=$(git describe --tags --abbrev=0 2>/dev/null || echo "none")
+          echo "current_release=$CURRENT_RELEASE" >> $GITHUB_OUTPUT
+          echo "Aktuelle Fork Version: $CURRENT_RELEASE"
+      
+      - name: Check if Update Needed
+        id: check
+        run: |
+          UPSTREAM="${{ steps.upstream.outputs.latest_release }}"
+          CURRENT="${{ steps.current.outputs. current_release }}"
+          
+          if [ "$UPSTREAM" != "$CURRENT" ]; then
+            echo "needs_update=true" >> $GITHUB_OUTPUT
+            echo "✅ Update verfügbar: $CURRENT -> $UPSTREAM"
+          else
+            echo "needs_update=false" >> $GITHUB_OUTPUT
+            echo "✨ Fork ist aktuell ($CURRENT)"
+          fi
       
       - name: Configure Git
+        if: steps.check.outputs.needs_update == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
       
-      - name: Add Upstream Remote
+      - name: Sync with Upstream
+        if: steps. check.outputs.needs_update == 'true'
         run: |
-          git remote add upstream https://github.com/rustdesk/rustdesk.git || true
-          git fetch upstream
-      
-      - name: Merge Upstream Changes
-        run: |
-          git checkout master
-          git merge upstream/master --no-edit
-        continue-on-error: false
+          # Upstream hinzufügen
+          git remote add upstream https://github.com/rustdesk/rustdesk. git || true
+          
+          # Speziellen Release-Tag fetchen
+          git fetch upstream tag ${{ steps.upstream.outputs. latest_release }}
+          
+          # Merge des Release-Tags
+          git merge ${{ steps.upstream.outputs.latest_release }} --no-edit -m "Sync with upstream release ${{ steps.upstream.outputs. latest_release }}"
       
       - name: Push Changes
+        if: steps.check.outputs.needs_update == 'true'
         run: |
           git push origin master
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+          # Tag auch im Fork erstellen
+          git tag ${{ steps.upstream.outputs.latest_release }} || true
+          git push origin ${{ steps.upstream.outputs.latest_release }} || true
       
-      - name: Trigger Custom Build
-        if: success()
+      - name: Create Summary
         run: |
-          echo "Sync erfolgreich - Build wird automatisch getriggert"
+          echo "## 🔄 Sync Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Upstream Release:** ${{ steps. upstream.outputs.latest_release }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Fork Version:** ${{ steps.current.outputs.current_release }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Update benötigt:** ${{ steps.check.outputs.needs_update }}" >> $GITHUB_STEP_SUMMARYs
